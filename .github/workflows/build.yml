@@ -1,1 +1,68 @@
+name: Build Android (Godot)
+on:
+  push:
+  workflow_dispatch:
 
+env:
+  GODOT_VERSION: "4.3"
+  GODOT_ANDROID_KEYSTORE_DEBUG_PATH: /home/runner/debug.keystore
+  GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+  GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extrair projeto
+        run: |
+          ZIP=$(ls ulo-etapa*.zip | sort -V | tail -1)
+          echo "Usando $ZIP"
+          unzip -o "$ZIP"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Instalar Godot e templates de exportação
+        run: |
+          BASE=https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable
+          wget -q "$BASE/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          wget -q "$BASE/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q "Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          sudo mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+          mkdir -p ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          unzip -q "Godot_v${GODOT_VERSION}-stable_export_templates.tpz" -d /tmp/tpl
+          mv /tmp/tpl/templates/* ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable/
+
+      - name: Configurar Android (SDK, Java e chave de debug)
+        run: |
+          keytool -genkeypair -keystore /home/runner/debug.keystore -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          mkdir -p ~/.config/godot
+          cat > ~/.config/godot/editor_settings-4.tres <<EOF2
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/debug_keystore = "/home/runner/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOF2
+
+      - name: Importar recursos
+        run: godot --headless --path . --import || true
+
+      - name: Exportar APK
+        run: |
+          mkdir -p build
+          godot --headless --path . --export-debug "Android" build/ultimate-life-online.apk
+          ls -la build
+          test -f build/ultimate-life-online.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ultimate-life-online-apk
+          path: build/*.apk
